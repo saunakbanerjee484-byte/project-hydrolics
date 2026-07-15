@@ -1,0 +1,7 @@
+{
+  "yn": 0.4961779148354713,
+  "yc": 1.2368657354481634,
+  "regime": "Supercritical control (upstream) -> solved upstream to downstream",
+  "curve_type": "S2 (drawdown, yn < y < yc)",
+  "jump": null
+}

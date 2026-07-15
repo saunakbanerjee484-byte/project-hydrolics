@@ -1,9 +1,113 @@
-Open Channel Hydraulics Analysis Suite
-A Modular Computational Engine for Open Channel Flow Mechanics and Water Surface Profile Modeling
-📌 Project Overview
-This computational suite provides an optimized, object-oriented Python engine designed to model uniform flow equilibrium, specific energy states, and non-uniform Gradually Varied Flow (GVF) surface profiles in open channels. By shifting away from crude linear approximations, the engine couples iterative root-finding algorithms with high-order numerical integration schemes. The framework is designed to process user-defined geometric and hydraulic parameters to evaluate channel classifications and generate analytical, publication-quality visual dashboards.
-Core Architecture & Computational Pipeline
-The codebase executes sequentially across a structured, multi-phase simulation stack:
+# Open Channel Flow Analysis Suite
 
-[User Input Module] ──► [Geometry & Uniform Flow Module] ──► [Specific Energy Module] ──► [GVF RK4 Solver] ──► [Dashboard Visualization ]
- Geometric Processing & Equilibrium SolverThe module evaluates generalized channel shapes (supporting both trapezoidal and rectangular configurations). By dynamically tracking geometric elements—such as cross-sectional area, top width, wetted perimeter, and hydraulic radius—against fluid velocity, the system isolates critical flow states:Normal Depth Solver: Implements a multidimensional convergence engine (scipy.optimize.fsolve) to numerically evaluate implicit equations matching flow equilibrium conditions.Critical Depth Solver: Isolates the theoretical boundary separating different flow regimes based on local Froude criteria.2. Specific Energy & Asymptotic Regime MappingThe platform computes energy distributions across the entire functional depth spectrum of the channel. Beyond mapping the primary profile path, the system employs secondary root isolation loops to identify alternate flow depths—structurally separating the subcritical upper branches from the supercritical lower branches for identical specific energy states.3. High-Order Numerical ODE Integration (RK4)To simulate space-variant non-uniform surface slopes, the suite evaluates the dynamic space-variant differential equation governing gradually varied flows.Numerical Stability Engine: Near-critical flow transitions create arithmetic instabilities. The framework implements an adaptive Froude-capping validation layer that stabilizes computations during sudden structural transitions.4th-Order Runge-Kutta (RK4) Solver: Deploys a classical integration scheme to drastically minimize local truncation errors over extended reach lengths.Directional Adaptive Loop: The computational flow direction automatically pivots based on the Froude regime. Subcritical states trigger downstream-to-upstream backwater curve computation (negative spatial steps), while supercritical configurations trigger upstream-to-downstream drawdown curves (positive spatial steps).🛠️ Feature Suite & UI InterfaceAlgorithmic Regime Classification: Automatically evaluates baseline configurations to classify channel slopes (such as Mild or Steep regimes) and assigns explicit structural designations ($M_1, M_2, M_3$ or $S_1, S_2, S_3$).Dual-Panel Diagnostic Dashboard: Features a vector rendering script that exports a high-resolution execution plot (gvf_dashboard.png):Panel A (Energy Domain): Captures non-linear energy paths, marking exact coordinate locations for critical points, normal flow boundaries, and alternate depths.Panel B (Spatial Domain): Computes and projects structural channel bed slopes relative to critical and normal depth baselines alongside the final simulated water surface profile wave.💻 Tech Stack & DependenciesLanguage Environment: Python 3.x (Modular, Object-Oriented design patterns)Scientific Computation: NumPy (Vectorized array operations), SciPy (Implicit non-linear root-finding algorithms)Visualization Engine: Matplotlib (High-fidelity vector graphics and subplots formatting)📅 Future Roadmap & Modular ExtensionsThe underlying codebase architecture is systematically decoupled to support seamless scalability:Automated Jump Localization: Adding momentum matching routines to dynamically isolate spatial locations of physical hydraulic jumps and measure local energy dissipation.Artificial Control Boundaries: Integrating specialized boundary criteria to model fluid behaviors approaching structures like broad-crested weirs and adjustable sluice gates.Reactive Deployment Layer: Migrating the scientific engine into an active web-app dashboard utilizing Streamlit for front-end management and Plotly for interactive, hover-responsive graph components.
+An object-oriented Python engine for open-channel hydraulics: uniform flow,
+critical flow, specific energy, gradually varied flow (GVF), and hydraulic
+jumps -- with three front ends (CLI, Tkinter desktop GUI, Streamlit web app)
+built on the same core.
+
+## Architecture
+
+```
+open_channel_flow/            <- core engine (import this from anywhere)
+    geometry.py                 4 cross-sections: Rectangular, Triangular,
+                                 Trapezoidal, Circular. Input validation +
+                                 zero-division guards live here.
+    core.py                     OpenChannelFlow class: normal_depth(),
+                                 critical_depth(), velocity(), froude(),
+                                 regime(), classify_channel().
+    energy.py                   specific_energy(), energy_curve(),
+                                 alternate_depth().
+    gvf.py                      friction_slope(), RK4 integrator,
+                                 solve_profile() (direction-aware),
+                                 classify_curve() (M1-M3 / S1-S3),
+                                 stitch_uniform_flow() (fills in the
+                                 uniform-flow segment on the far side of
+                                 a detected jump).
+    jump.py                     momentum_function() (Belanger),
+                                 sequent_depth(), jump_energy_loss(),
+                                 belanger_rectangular() (closed-form
+                                 check), locate_jump().
+    control_structures.py       sluice_gate_depth(),
+                                 weir_downstream_depth() -- derive the GVF
+                                 boundary depth from a real structure.
+    io_utils.py                 validation, tabular_report(),
+                                 export_csv/json/excel().
+    optimize.py                 most_economical_trapezoidal() (SLSQP),
+                                 roughness_sensitivity().
+    visualization.py            build_dashboard() (dual-panel Matplotlib
+                                 + jump marker), plot_roughness_sensitivity().
+
+main.py            CLI: prompts for shape/flow/boundary, prints results,
+                    exports CSV/JSON/Excel, saves gvf_dashboard.png.
+gui_tkinter.py      Desktop GUI: form + embedded Matplotlib dashboard.
+app_streamlit.py    Interactive web app: sliders + live Plotly charts.
+tests/              pytest unit tests (18 tests, geometry/core/gvf/jump).
+```
+
+## Why the code is structured this way
+
+- **Every cross-section shares one interface** (`area`, `top_width`,
+  `wetted_perimeter`, `hydraulic_radius`, `area_moment`), so the entire
+  rest of the engine (Manning solver, critical depth, GVF, jump momentum
+  function) works identically for a rectangle, triangle, trapezoid, or
+  pipe -- swap the `CrossSection` instance and nothing else changes.
+- **Physical validity guards are enforced at the geometry/core layer**,
+  not scattered through the app code: negative widths/slopes raise
+  `GeometryError` at construction time; zero or negative depth raises it
+  on first use; solver non-convergence raises `ConvergenceError`.
+- **The GVF integrator refuses to cross critical depth smoothly.** A real
+  GVF curve cannot pass through `y = yc` -- that's exactly where a
+  hydraulic jump belongs instead. `solve_profile()` stops there rather
+  than grinding through to a numerically meaningless blow-up, and
+  `locate_jump()` + `stitch_uniform_flow()` fill in the rest of the reach
+  with the correct uniform-flow segment.
+
+## Hydraulic jump detection -- what it does and doesn't cover
+
+`locate_jump()` handles the two standard "mixed regime" textbook cases:
+
+- **Case A (steep channel, downstream control):** a dam or weir forces a
+  subcritical depth downstream of a channel whose normal flow is
+  naturally supercritical. The jump sits where the backwater (M/S1) curve's
+  depth matches the sequent depth of the uniform upstream flow.
+- **Case B (mild channel, upstream control):** a sluice gate releases
+  supercritical flow into a channel whose normal flow is subcritical. The
+  jump sits where the sequent depth of the S-curve first matches the
+  downstream normal depth.
+
+It does **not** currently handle multiple jumps in one reach, jumps forced
+by a mid-channel slope break (compound-slope channels), or submerged/
+drowned jumps. `sequent_depth()` and `momentum_function()` are general
+(work for any `CrossSection`), and are cross-checked in the test suite
+against the closed-form Belanger equation for rectangular channels.
+
+## Running it
+
+```bash
+pip install numpy scipy matplotlib pandas openpyxl streamlit plotly pytest
+
+python main.py                    # interactive CLI
+python gui_tkinter.py             # desktop GUI (needs a display)
+streamlit run app_streamlit.py    # interactive web app
+python -m pytest tests/ -v        # unit tests
+```
+
+## Extension lab features included
+
+- `optimize.most_economical_trapezoidal()` -- finds the least-perimeter
+  (B, y) pair for a given Q, n, S0, z via `scipy.optimize.minimize`
+  (SLSQP), and checks the result against the closed-form best-hydraulic-
+  section formula `B = 2y(sqrt(1+z^2) - z)`.
+- `optimize.roughness_sensitivity()` -- sweeps a range of Manning's n and
+  returns the resulting normal depth for each, paired with
+  `visualization.plot_roughness_sensitivity()`.
+- `gui_tkinter.py` -- full Tkinter desktop control dashboard.
+
+## Known limitations / next steps
+
+- The RK4 step size is fixed, not adaptive; very steep gradients near
+  `yc` can need a smaller `dx` for full accuracy.
+- Composite/multi-reach channels (different S0 or n along the same
+  channel) aren't modeled -- each run assumes one uniform reach.
+- `Circular.area_moment()` falls back to numerical integration (no
+  closed form implemented yet), which is slightly slower but accurate.
